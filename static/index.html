@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command Template Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1f4a5c;
+            color: #d4e3e8;
+            display: flex;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 70%;
+            padding: 20px;
+            background-color: #2b6777;
+            border-radius: 8px;
+            margin: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .sidebar {
+            width: 30%;
+            background-color: #164752;
+            color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h2, h3 {
+            color: #d4e3e8;
+            text-align: center;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #333;
+            background-color: #1f4a5c;
+            color: #d4e3e8;
+        }
+
+        button {
+            padding: 10px;
+            background-color: #49a79e;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+
+        button:hover {
+            background-color: #3e8988;
+        }
+
+        .command-item {
+            background-color: #285a66;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .command-item button {
+            background-color: #ff6f61;
+            padding: 5px;
+            margin: 5px;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .command-item:hover {
+            background-color: #327b8a;
+        }
+
+        .input-field {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .input-field button {
+            background-color: #ff6f61;
+            margin-left: 5px;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Command Template Generator</h2>
+
+    <label for="command-template">Command Template:</label>
+    <textarea id="command-template" rows="3" placeholder="Enter command template (e.g., ssh {1} -p {2})"></textarea>
+
+    <div id="input-container">
+        <button onclick="addInput()">Add Variable</button>
+    </div>
+
+    <button onclick="generateCommand()">Generate Command</button>
+    <button onclick="saveCommand()">Save Command</button>
+
+    <h3>Generated Command:</h3>
+    <pre id="output-command" onclick="copyToClipboard()">Click to copy generated command</pre>
+</div>
+
+<div class="sidebar">
+    <h3>Saved Commands</h3>
+    <div id="commands-list"></div>
+</div>
+
+<script>
+    let inputCounter = 1;
+    let editingCommandId = null;  // Track the ID of the command being edited
+
+    async function loadCommands() {
+        const response = await fetch('/get_commands');
+        const commands = await response.json();
+        const commandsList = document.getElementById('commands-list');
+        commandsList.innerHTML = '';
+        commands.forEach(cmd => {
+            const commandItem = document.createElement('div');
+            commandItem.classList.add('command-item');
+            commandItem.innerHTML = `
+                <span>${cmd.generated_command}</span>
+                <button onclick="editCommand(${cmd.id})">Edit</button>
+                <button onclick="deleteCommand(${cmd.id})">Delete</button>
+            `;
+            commandsList.appendChild(commandItem);
+        });
+    }
+
+    function addInput() {
+        const inputContainer = document.getElementById('input-container');
+        const newInput = document.createElement('div');
+        newInput.classList.add('input-field');
+        newInput.innerHTML = `
+            <label>Variable ${inputCounter}: </label>
+            <input type="text" id="var${inputCounter}" placeholder="Enter value for {${inputCounter}}">
+            <button onclick="removeInput(this)">Remove</button>
+        `;
+        inputContainer.appendChild(newInput);
+        inputCounter++;
+    }
+
+    function generateCommand() {
+        let commandTemplate = document.getElementById('command-template').value;
+        for (let i = 1; i < inputCounter; i++) {
+            const variableInput = document.getElementById(`var${i}`);
+            if (variableInput) {
+                const value = variableInput.value || `{${i}}`;
+                commandTemplate = commandTemplate.replace(new RegExp(`\\{${i}\\}`, 'g'), value);
+            }
+        }
+        document.getElementById('output-command').textContent = commandTemplate;
+    }
+
+    async function saveCommand() {
+        const template = document.getElementById('command-template').value;
+        const generatedCommand = document.getElementById('output-command').textContent;
+
+        if (editingCommandId) {
+            // If editing, update the existing command
+            await fetch('/edit_command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: editingCommandId, template, generated_command: generatedCommand })
+            });
+            editingCommandId = null; // Reset editing mode
+        } else {
+            // If not editing, save as a new command
+            await fetch('/save_command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template, generated_command: generatedCommand })
+            });
+        }
+        
+        // Clear inputs after saving
+        document.getElementById('command-template').value = '';
+        document.getElementById('output-command').textContent = '';
+        document.getElementById('input-container').innerHTML = '<button onclick="addInput()">Add Variable</button>';
+        inputCounter = 1;
+        
+        loadCommands();
+    }
+
+    async function editCommand(id) {
+        const response = await fetch('/get_commands');
+        const commands = await response.json();
+        const command = commands.find(cmd => cmd.id === id);
+
+        if (command) {
+            // Set global editing ID
+            editingCommandId = id;
+
+            // Populate the command template
+            document.getElementById('command-template').value = command.template;
+
+            // Clear existing input fields and reset counter
+            document.getElementById('input-container').innerHTML = '<button onclick="addInput()">Add Variable</button>';
+            inputCounter = 1;
+
+            // Parse and populate variables if they follow the {1}, {2} pattern
+            let match;
+            const regex = /\{(\d+)\}/g;
+            while ((match = regex.exec(command.template)) !== null) {
+                const variableIndex = parseInt(match[1]);
+                addInput(); // Add a new input field for each variable found
+                document.getElementById(`var${variableIndex}`).value = command.generated_command.split(match[0])[1];
+            }
+        }
+    }
+
+    async function deleteCommand(id) {
+        await fetch('/delete_command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        loadCommands();
+    }
+
+    function copyToClipboard() {
+        const outputCommand = document.getElementById('output-command');
+        navigator.clipboard.writeText(outputCommand.textContent)
+            .then(() => alert("Command copied to clipboard!"));
+    }
+
+    window.onload = loadCommands;
+</script>
+
+</body>
+</html>
